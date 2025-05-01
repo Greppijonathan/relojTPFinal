@@ -1,8 +1,6 @@
-/*
-
-*/
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include <stdio.h>
 #include <time.h>
 #include "esp_system.h"
@@ -17,23 +15,54 @@
 #define DIGITO_APAGADO 0x3800
 #define DIGITO_FONDO ILI9341_BLACK
 
-static const char *TAG = "RTC_Example";
+static const char *TAG = "RTC";
+
+QueueHandle_t colaControlTiempo;
+
+#define EVENTO_100MS (1 << 0)
+#define EVENTO_1S (1 << 1)
+
+void controlTiempo(void *p)
+{
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    uint8_t eventos;
+
+    while (1)
+    {
+        eventos = EVENTO_100MS;
+        xQueueSend(colaControlTiempo, &eventos, 0);
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(100));
+
+        if ((xLastWakeTime % pdMS_TO_TICKS(1000)) == 0)
+        {
+            eventos = EVENTO_1S;
+            xQueueSend(colaControlTiempo, &eventos, 0);
+        }
+    }
+}
 
 void obtenerFechaHora(void *p)
 {
     time_t t;
     struct tm timeinfo;
+    uint8_t evento;
+
     while (1)
     {
-        time(&t);
-        localtime_r(&t, &timeinfo);
-        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        if (xQueueReceive(colaControlTiempo, &evento, portMAX_DELAY))
+        {
+            if (evento & EVENTO_100MS)
+            {
+                time(&t);
+                localtime_r(&t, &timeinfo);
+            }
+        }
     }
 }
 
 void actualizarPantalla(void *p)
 {
-    TickType_t xLastWakeTime = xTaskGetTickCount();
     ILI9341Init();
     ILI9341Rotate(ILI9341_Landscape_1);
 
@@ -75,67 +104,73 @@ void actualizarPantalla(void *p)
 
     struct tm timeinfo_prev = timeinfo;
     int year_prev = year;
-
+    uint8_t evento;
     while (1)
     {
-        time(&now);
-        localtime_r(&now, &timeinfo);
+        if (xQueueReceive(colaControlTiempo, &evento, portMAX_DELAY))
+        {
+            if (evento & EVENTO_100MS)
+            {
+                time(&now);
+                localtime_r(&now, &timeinfo);
 
-        if (timeinfo.tm_hour != timeinfo_prev.tm_hour)
-        {
-            DibujarDigito(PanelHoras, 0, timeinfo.tm_hour / 10);
-            DibujarDigito(PanelHoras, 1, timeinfo.tm_hour % 10);
+                if (timeinfo.tm_hour != timeinfo_prev.tm_hour)
+                {
+                    DibujarDigito(PanelHoras, 0, timeinfo.tm_hour / 10);
+                    DibujarDigito(PanelHoras, 1, timeinfo.tm_hour % 10);
+                }
+                if (timeinfo.tm_min != timeinfo_prev.tm_min)
+                {
+                    DibujarDigito(PanelMinutos, 0, timeinfo.tm_min / 10);
+                    DibujarDigito(PanelMinutos, 1, timeinfo.tm_min % 10);
+                }
+                if (timeinfo.tm_sec != timeinfo_prev.tm_sec)
+                {
+                    DibujarDigito(PanelSegundos, 0, timeinfo.tm_sec / 10);
+                    DibujarDigito(PanelSegundos, 1, timeinfo.tm_sec % 10);
+                }
+                if (timeinfo.tm_mday != timeinfo_prev.tm_mday)
+                {
+                    DibujarDigito(PanelDia, 0, timeinfo.tm_mday / 10);
+                    DibujarDigito(PanelDia, 1, timeinfo.tm_mday % 10);
+                }
+                if (timeinfo.tm_mon != timeinfo_prev.tm_mon)
+                {
+                    DibujarDigito(PanelMes, 0, (timeinfo.tm_mon + 1) / 10);
+                    DibujarDigito(PanelMes, 1, (timeinfo.tm_mon + 1) % 10);
+                }
+                year = timeinfo.tm_year + 1900;
+                if (year != year_prev)
+                {
+                    DibujarDigito(PanelAnio, 0, (year / 1000) % 10);
+                    DibujarDigito(PanelAnio, 1, (year / 100) % 10);
+                    DibujarDigito(PanelAnio, 2, (year / 10) % 10);
+                    DibujarDigito(PanelAnio, 3, year % 10);
+                    year_prev = year;
+                }
+                timeinfo_prev = timeinfo;
+            }
         }
-        if (timeinfo.tm_min != timeinfo_prev.tm_min)
-        {
-            DibujarDigito(PanelMinutos, 0, timeinfo.tm_min / 10);
-            DibujarDigito(PanelMinutos, 1, timeinfo.tm_min % 10);
-        }
-        if (timeinfo.tm_sec != timeinfo_prev.tm_sec)
-        {
-            DibujarDigito(PanelSegundos, 0, timeinfo.tm_sec / 10);
-            DibujarDigito(PanelSegundos, 1, timeinfo.tm_sec % 10);
-        }
-        if (timeinfo.tm_mday != timeinfo_prev.tm_mday)
-        {
-            DibujarDigito(PanelDia, 0, timeinfo.tm_mday / 10);
-            DibujarDigito(PanelDia, 1, timeinfo.tm_mday % 10);
-        }
-        if (timeinfo.tm_mon != timeinfo_prev.tm_mon)
-        {
-            DibujarDigito(PanelMes, 0, (timeinfo.tm_mon + 1) / 10);
-            DibujarDigito(PanelMes, 1, (timeinfo.tm_mon + 1) % 10);
-        }
-        year = timeinfo.tm_year + 1900;
-        if (year != year_prev)
-        {
-            DibujarDigito(PanelAnio, 0, (year / 1000) % 10);
-            DibujarDigito(PanelAnio, 1, (year / 100) % 10);
-            DibujarDigito(PanelAnio, 2, (year / 10) % 10);
-            DibujarDigito(PanelAnio, 3, year % 10);
-            year_prev = year;
-        }
-        timeinfo_prev = timeinfo;
-        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1000));
     }
 }
 
 void app_main(void)
 {
-    // Configurar el RTC con una hora inicial (por ejemplo, 1 de enero de 2025, 12:00:00)
     struct tm timeinfo = {
-        .tm_year = 2025 - 1900, // Año desde 1900
-        .tm_mon = 0,            // Mes (0 = enero)
-        .tm_mday = 1,           // Día del mes
-        .tm_hour = 12,          // Hora
-        .tm_min = 0,            // Minuto
-        .tm_sec = 0             // Segundo
-    };
+        .tm_year = 2025 - 1900,
+        .tm_mon = 0,
+        .tm_mday = 1,
+        .tm_hour = 12,
+        .tm_min = 0,
+        .tm_sec = 0};
 
     time_t t = mktime(&timeinfo);
     struct timeval now = {.tv_sec = t};
     settimeofday(&now, NULL);
 
-    xTaskCreate(obtenerFechaHora, "ImprimirFechaHora", 2048, NULL, 1, NULL);
+    colaControlTiempo = xQueueCreate(10, sizeof(uint8_t));
+
+    xTaskCreate(obtenerFechaHora, "ObtieneFechaHora", 2048, NULL, 1, NULL);
+    xTaskCreate(controlTiempo, "TiempoParaTareas", 2048, NULL, 2, NULL);
     xTaskCreate(actualizarPantalla, "ActualizarPantalla", 2048, NULL, 1, NULL);
 }
