@@ -8,6 +8,7 @@
 #include <sys/time.h>
 #include "ili9341.h"
 #include "digitos.h"
+#include "teclasconfig.h"
 
 #define DIGITO_ANCHO 40
 #define DIGITO_ALTO 80
@@ -58,6 +59,92 @@ void obtenerFechaHora(void *p)
                 localtime_r(&t, &timeinfo);
             }
         }
+    }
+}
+void ajustarFechaHora(void *p)
+{
+    configuracion_pin_t configuraciones[] = {
+        {TEC1_Config, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY},
+        {TEC2_Inc, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY},
+        {TEC3_Dec, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY}};
+    ConfigurarTeclas(configuraciones, sizeof(configuraciones) / sizeof(configuraciones[0]));
+
+    int modo = 0; // 0: horas, 1: minutos, 2: día, 3: mes, 4: año
+    struct tm timeinfo;
+    time_t t;
+
+    while (1)
+    {
+        // Verificar si se presiona TEC1_Config
+        if (!gpio_get_level(TEC1_Config))
+        {
+            modo = (modo + 1) % 5;                                    // Cambia entre las opciones de configuración
+            ESP_LOGI("Ajuste", "Cambió al modo de ajuste: %d", modo); // Informar por comunicación serie
+            vTaskDelay(pdMS_TO_TICKS(300));                           // Anti rebote
+        }
+
+        // Verificar si se presiona TEC2_Inc
+        if (!gpio_get_level(TEC2_Inc))
+        {
+            time(&t);
+            localtime_r(&t, &timeinfo);
+
+            switch (modo)
+            {
+            case 0:
+                timeinfo.tm_hour = (timeinfo.tm_hour + 1) % 24;
+                break;
+            case 1:
+                timeinfo.tm_min = (timeinfo.tm_min + 1) % 60;
+                break;
+            case 2:
+                timeinfo.tm_mday = (timeinfo.tm_mday % 31) + 1;
+                break;
+            case 3:
+                timeinfo.tm_mon = (timeinfo.tm_mon + 1) % 12;
+                break;
+            case 4:
+                timeinfo.tm_year = timeinfo.tm_year + 1;
+                break;
+            }
+            t = mktime(&timeinfo);
+            struct timeval now = {.tv_sec = t};
+            settimeofday(&now, NULL);
+            ESP_LOGI("Ajuste", "Incremento en el modo %d", modo);
+            vTaskDelay(pdMS_TO_TICKS(300));
+        }
+
+        if (!gpio_get_level(TEC3_Dec))
+        {
+            time(&t);
+            localtime_r(&t, &timeinfo);
+
+            switch (modo)
+            {
+            case 0:
+                timeinfo.tm_hour = (timeinfo.tm_hour == 0 ? 23 : timeinfo.tm_hour - 1);
+                break;
+            case 1:
+                timeinfo.tm_min = (timeinfo.tm_min == 0 ? 59 : timeinfo.tm_min - 1);
+                break;
+            case 2:
+                timeinfo.tm_mday = (timeinfo.tm_mday == 1 ? 31 : timeinfo.tm_mday - 1);
+                break;
+            case 3:
+                timeinfo.tm_mon = (timeinfo.tm_mon == 0 ? 11 : timeinfo.tm_mon - 1);
+                break;
+            case 4:
+                timeinfo.tm_year = timeinfo.tm_year - 1;
+                break;
+            }
+            t = mktime(&timeinfo);
+            struct timeval now = {.tv_sec = t};
+            settimeofday(&now, NULL);
+            ESP_LOGI("Ajuste", "Decremento en el modo %d", modo);
+            vTaskDelay(pdMS_TO_TICKS(300));
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
@@ -154,6 +241,15 @@ void actualizarPantalla(void *p)
     }
 }
 
+void leerBotones(void *p)
+{
+    configuracion_pin_t configuraciones[] = {
+        {TEC1_Config, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY},
+        {TEC2_Inc, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY},
+        {TEC3_Dec, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY}};
+    ConfigurarTeclas(configuraciones, sizeof(configuraciones) / sizeof(configuraciones[0]));
+}
+
 void app_main(void)
 {
     struct tm timeinfo = {
@@ -173,4 +269,5 @@ void app_main(void)
     xTaskCreate(obtenerFechaHora, "ObtieneFechaHora", 2048, NULL, 1, NULL);
     xTaskCreate(controlTiempo, "TiempoParaTareas", 2048, NULL, 2, NULL);
     xTaskCreate(actualizarPantalla, "ActualizarPantalla", 2048, NULL, 1, NULL);
+    xTaskCreate(ajustarFechaHora, "ConfigurarFechaHora", 2048, NULL, 1, NULL);
 }
