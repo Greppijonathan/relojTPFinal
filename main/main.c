@@ -13,7 +13,7 @@
 #define DIGITO_ANCHO 40
 #define DIGITO_ALTO 80
 #define DIGITO_ENCENDIDO ILI9341_RED
-#define DIGITO_AJUSTE ILI9341_BLUE2
+// #define DIGITO_AJUSTE ILI9341_BLUE2
 #define DIGITO_APAGADO 0x3800
 #define DIGITO_FONDO ILI9341_BLACK
 
@@ -73,7 +73,7 @@ void ajustarFechaHora(void *p)
 
     ConfigurarTeclas(configuraciones, sizeof(configuraciones) / sizeof(configuraciones[0]));
 
-    int modo = 0; // 0: horas, 1: minutos, 2: día, 3: mes, 4: año
+    int modo = -1; // Inicialmente en -1 para que la primera vez ajuste minutos
     struct tm timeinfo;
     time_t t;
 
@@ -104,8 +104,12 @@ void ajustarFechaHora(void *p)
                 if ((xTaskGetTickCount() - tiempoInicioPresionado) < pdMS_TO_TICKS(2000))
                 {
                     modoAjusteReloj = true; // Activar modo ajuste al presionar una vez
-                    modo = (modo + 1) % 5;  // Cambia entre opciones de configuración
-                    ESP_LOGI("Ajuste", "modoAjusteReloj ACTIVADO, modo: %d", modo);
+                    modo = (modo + 1) % 5;  // Cambia entre opciones de configuración respetando el orden
+                    ESP_LOGI("Ajuste", "modoAjusteReloj ACTIVADO, ajustando: %s",
+                             (modo == 0) ? "Minutos" : (modo == 1) ? "Horas"
+                                                   : (modo == 2)   ? "Día"
+                                                   : (modo == 3)   ? "Mes"
+                                                                   : "Año");
                 }
                 tiempoInicioPresionado = 0;     // Restablecer tiempo de presión
                 vTaskDelay(pdMS_TO_TICKS(300)); // Anti rebote
@@ -123,10 +127,10 @@ void ajustarFechaHora(void *p)
                 switch (modo)
                 {
                 case 0:
-                    timeinfo.tm_hour = (timeinfo.tm_hour + 1) % 24;
+                    timeinfo.tm_min = (timeinfo.tm_min + 1) % 60;
                     break;
                 case 1:
-                    timeinfo.tm_min = (timeinfo.tm_min + 1) % 60;
+                    timeinfo.tm_hour = (timeinfo.tm_hour + 1) % 24;
                     break;
                 case 2:
                     timeinfo.tm_mday = (timeinfo.tm_mday % 31) + 1;
@@ -141,7 +145,11 @@ void ajustarFechaHora(void *p)
                 t = mktime(&timeinfo);
                 struct timeval now = {.tv_sec = t};
                 settimeofday(&now, NULL);
-                ESP_LOGI("Ajuste", "Incremento en el modo %d", modo);
+                ESP_LOGI("Ajuste", "Incremento en: %s",
+                         (modo == 0) ? "Minutos" : (modo == 1) ? "Horas"
+                                               : (modo == 2)   ? "Día"
+                                               : (modo == 3)   ? "Mes"
+                                                               : "Año");
                 vTaskDelay(pdMS_TO_TICKS(300));
             }
 
@@ -153,10 +161,10 @@ void ajustarFechaHora(void *p)
                 switch (modo)
                 {
                 case 0:
-                    timeinfo.tm_hour = (timeinfo.tm_hour == 0 ? 23 : timeinfo.tm_hour - 1);
+                    timeinfo.tm_min = (timeinfo.tm_min == 0 ? 59 : timeinfo.tm_min - 1);
                     break;
                 case 1:
-                    timeinfo.tm_min = (timeinfo.tm_min == 0 ? 59 : timeinfo.tm_min - 1);
+                    timeinfo.tm_hour = (timeinfo.tm_hour == 0 ? 23 : timeinfo.tm_hour - 1);
                     break;
                 case 2:
                     timeinfo.tm_mday = (timeinfo.tm_mday == 1 ? 31 : timeinfo.tm_mday - 1);
@@ -171,7 +179,11 @@ void ajustarFechaHora(void *p)
                 t = mktime(&timeinfo);
                 struct timeval now = {.tv_sec = t};
                 settimeofday(&now, NULL);
-                ESP_LOGI("Ajuste", "Decremento en el modo %d", modo);
+                ESP_LOGI("Ajuste", "Decremento en: %s",
+                         (modo == 0) ? "Minutos" : (modo == 1) ? "Horas"
+                                               : (modo == 2)   ? "Día"
+                                               : (modo == 3)   ? "Mes"
+                                                               : "Año");
                 vTaskDelay(pdMS_TO_TICKS(300));
             }
         }
