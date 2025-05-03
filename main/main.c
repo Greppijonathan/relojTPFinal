@@ -13,8 +13,11 @@
 #define DIGITO_ANCHO 40
 #define DIGITO_ALTO 80
 #define DIGITO_ENCENDIDO ILI9341_RED
+#define DIGITO_AJUSTE ILI9341_BLUE2
 #define DIGITO_APAGADO 0x3800
 #define DIGITO_FONDO ILI9341_BLACK
+
+bool modoAjusteReloj = false;
 
 static const char *TAG = "RTC";
 
@@ -67,83 +70,111 @@ void ajustarFechaHora(void *p)
         {TEC1_Config, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY},
         {TEC2_Inc, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY},
         {TEC3_Dec, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY}};
+
     ConfigurarTeclas(configuraciones, sizeof(configuraciones) / sizeof(configuraciones[0]));
 
     int modo = 0; // 0: horas, 1: minutos, 2: día, 3: mes, 4: año
     struct tm timeinfo;
     time_t t;
 
+    bool modoAjusteReloj = false; // Inicialmente apagado
+    TickType_t tiempoInicioPresionado = 0;
+
     while (1)
     {
         // Verificar si se presiona TEC1_Config
         if (!gpio_get_level(TEC1_Config))
         {
-            modo = (modo + 1) % 5;                                    // Cambia entre las opciones de configuración
-            ESP_LOGI("Ajuste", "Cambió al modo de ajuste: %d", modo); // Informar por comunicación serie
-            vTaskDelay(pdMS_TO_TICKS(300));                           // Anti rebote
-        }
-
-        // Verificar si se presiona TEC2_Inc
-        if (!gpio_get_level(TEC2_Inc))
-        {
-            time(&t);
-            localtime_r(&t, &timeinfo);
-
-            switch (modo)
+            if (tiempoInicioPresionado == 0)
             {
-            case 0:
-                timeinfo.tm_hour = (timeinfo.tm_hour + 1) % 24;
-                break;
-            case 1:
-                timeinfo.tm_min = (timeinfo.tm_min + 1) % 60;
-                break;
-            case 2:
-                timeinfo.tm_mday = (timeinfo.tm_mday % 31) + 1;
-                break;
-            case 3:
-                timeinfo.tm_mon = (timeinfo.tm_mon + 1) % 12;
-                break;
-            case 4:
-                timeinfo.tm_year = timeinfo.tm_year + 1;
-                break;
+                tiempoInicioPresionado = xTaskGetTickCount();
             }
-            t = mktime(&timeinfo);
-            struct timeval now = {.tv_sec = t};
-            settimeofday(&now, NULL);
-            ESP_LOGI("Ajuste", "Incremento en el modo %d", modo);
-            vTaskDelay(pdMS_TO_TICKS(300));
-        }
-
-        if (!gpio_get_level(TEC3_Dec))
-        {
-            time(&t);
-            localtime_r(&t, &timeinfo);
-
-            switch (modo)
+            else if ((xTaskGetTickCount() - tiempoInicioPresionado) >= pdMS_TO_TICKS(2000))
             {
-            case 0:
-                timeinfo.tm_hour = (timeinfo.tm_hour == 0 ? 23 : timeinfo.tm_hour - 1);
-                break;
-            case 1:
-                timeinfo.tm_min = (timeinfo.tm_min == 0 ? 59 : timeinfo.tm_min - 1);
-                break;
-            case 2:
-                timeinfo.tm_mday = (timeinfo.tm_mday == 1 ? 31 : timeinfo.tm_mday - 1);
-                break;
-            case 3:
-                timeinfo.tm_mon = (timeinfo.tm_mon == 0 ? 11 : timeinfo.tm_mon - 1);
-                break;
-            case 4:
-                timeinfo.tm_year = timeinfo.tm_year - 1;
-                break;
+                modoAjusteReloj = false; // Salir del modo ajuste si se mantiene presionado más de 2 segundos
+                ESP_LOGI("Ajuste", "modoAjusteReloj desactivado por presión prolongada");
+                tiempoInicioPresionado = 0;
+                vTaskDelay(pdMS_TO_TICKS(500)); // Evitar falsas activaciones
             }
-            t = mktime(&timeinfo);
-            struct timeval now = {.tv_sec = t};
-            settimeofday(&now, NULL);
-            ESP_LOGI("Ajuste", "Decremento en el modo %d", modo);
-            vTaskDelay(pdMS_TO_TICKS(300));
+        }
+        else
+        {
+            if (tiempoInicioPresionado != 0)
+            {
+                if ((xTaskGetTickCount() - tiempoInicioPresionado) < pdMS_TO_TICKS(2000))
+                {
+                    modoAjusteReloj = true; // Activar modo ajuste al presionar una vez
+                    modo = (modo + 1) % 5;  // Cambia entre opciones de configuración
+                    ESP_LOGI("Ajuste", "modoAjusteReloj ACTIVADO, modo: %d", modo);
+                }
+                tiempoInicioPresionado = 0;     // Restablecer tiempo de presión
+                vTaskDelay(pdMS_TO_TICKS(300)); // Anti rebote
+            }
         }
 
+        // Solo modificar fecha y hora si el modo ajuste está activo
+        if (modoAjusteReloj)
+        {
+            if (!gpio_get_level(TEC2_Inc))
+            {
+                time(&t);
+                localtime_r(&t, &timeinfo);
+
+                switch (modo)
+                {
+                case 0:
+                    timeinfo.tm_hour = (timeinfo.tm_hour + 1) % 24;
+                    break;
+                case 1:
+                    timeinfo.tm_min = (timeinfo.tm_min + 1) % 60;
+                    break;
+                case 2:
+                    timeinfo.tm_mday = (timeinfo.tm_mday % 31) + 1;
+                    break;
+                case 3:
+                    timeinfo.tm_mon = (timeinfo.tm_mon + 1) % 12;
+                    break;
+                case 4:
+                    timeinfo.tm_year = timeinfo.tm_year + 1;
+                    break;
+                }
+                t = mktime(&timeinfo);
+                struct timeval now = {.tv_sec = t};
+                settimeofday(&now, NULL);
+                ESP_LOGI("Ajuste", "Incremento en el modo %d", modo);
+                vTaskDelay(pdMS_TO_TICKS(300));
+            }
+
+            if (!gpio_get_level(TEC3_Dec))
+            {
+                time(&t);
+                localtime_r(&t, &timeinfo);
+
+                switch (modo)
+                {
+                case 0:
+                    timeinfo.tm_hour = (timeinfo.tm_hour == 0 ? 23 : timeinfo.tm_hour - 1);
+                    break;
+                case 1:
+                    timeinfo.tm_min = (timeinfo.tm_min == 0 ? 59 : timeinfo.tm_min - 1);
+                    break;
+                case 2:
+                    timeinfo.tm_mday = (timeinfo.tm_mday == 1 ? 31 : timeinfo.tm_mday - 1);
+                    break;
+                case 3:
+                    timeinfo.tm_mon = (timeinfo.tm_mon == 0 ? 11 : timeinfo.tm_mon - 1);
+                    break;
+                case 4:
+                    timeinfo.tm_year = timeinfo.tm_year - 1;
+                    break;
+                }
+                t = mktime(&timeinfo);
+                struct timeval now = {.tv_sec = t};
+                settimeofday(&now, NULL);
+                ESP_LOGI("Ajuste", "Decremento en el modo %d", modo);
+                vTaskDelay(pdMS_TO_TICKS(300));
+            }
+        }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
@@ -241,15 +272,6 @@ void actualizarPantalla(void *p)
     }
 }
 
-void leerBotones(void *p)
-{
-    configuracion_pin_t configuraciones[] = {
-        {TEC1_Config, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY},
-        {TEC2_Inc, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY},
-        {TEC3_Dec, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY}};
-    ConfigurarTeclas(configuraciones, sizeof(configuraciones) / sizeof(configuraciones[0]));
-}
-
 void app_main(void)
 {
     struct tm timeinfo = {
@@ -271,3 +293,96 @@ void app_main(void)
     xTaskCreate(actualizarPantalla, "ActualizarPantalla", 2048, NULL, 1, NULL);
     xTaskCreate(ajustarFechaHora, "ConfigurarFechaHora", 2048, NULL, 1, NULL);
 }
+/*void actualizarPantalla(void *p)
+{
+    ILI9341Init();
+    ILI9341Rotate(ILI9341_Landscape_1);
+
+    panel_t PanelHoras = CrearPanel(9, 0, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
+    panel_t PanelMinutos = CrearPanel(113, 0, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
+    panel_t PanelSegundos = CrearPanel(223, 0, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
+    panel_t PanelDia = CrearPanel(40, 120, 2, DIGITO_ALTO - 40, DIGITO_ANCHO - 40, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
+    panel_t PanelMes = CrearPanel(110, 120, 2, DIGITO_ALTO - 40, DIGITO_ANCHO - 40, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
+    panel_t PanelAnio = CrearPanel(180, 120, 4, DIGITO_ALTO - 40, DIGITO_ANCHO - 40, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
+
+    struct tm timeinfo;
+    time_t now;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+
+    DibujarDigito(PanelHoras, 0, timeinfo.tm_hour / 10);
+    DibujarDigito(PanelHoras, 1, timeinfo.tm_hour % 10);
+    DibujarDigito(PanelMinutos, 0, timeinfo.tm_min / 10);
+    DibujarDigito(PanelMinutos, 1, timeinfo.tm_min % 10);
+    DibujarDigito(PanelSegundos, 0, timeinfo.tm_sec / 10);
+    DibujarDigito(PanelSegundos, 1, timeinfo.tm_sec % 10);
+    DibujarDigito(PanelDia, 0, timeinfo.tm_mday / 10);
+    DibujarDigito(PanelDia, 1, timeinfo.tm_mday % 10);
+    DibujarDigito(PanelMes, 0, (timeinfo.tm_mon + 1) / 10);
+    DibujarDigito(PanelMes, 1, (timeinfo.tm_mon + 1) % 10);
+
+    ILI9341DrawCircle(100, 25, 3, DIGITO_ENCENDIDO);
+    ILI9341DrawCircle(100, 55, 3, DIGITO_ENCENDIDO);
+    ILI9341DrawCircle(210, 25, 3, DIGITO_ENCENDIDO);
+    ILI9341DrawCircle(210, 55, 3, DIGITO_ENCENDIDO);
+    ILI9341DrawString(95, 130, "-", &font_11x18, DIGITO_ENCENDIDO, DIGITO_FONDO);
+    ILI9341DrawString(165, 130, "-", &font_11x18, DIGITO_ENCENDIDO, DIGITO_FONDO);
+
+    int year = timeinfo.tm_year + 1900;
+    DibujarDigito(PanelAnio, 0, (year / 1000) % 10);
+    DibujarDigito(PanelAnio, 1, (year / 100) % 10);
+    DibujarDigito(PanelAnio, 2, (year / 10) % 10);
+    DibujarDigito(PanelAnio, 3, year % 10);
+
+    struct tm timeinfo_prev = timeinfo;
+    int year_prev = year;
+    uint8_t evento;
+    while (1)
+    {
+        if (xQueueReceive(colaControlTiempo, &evento, portMAX_DELAY))
+        {
+            if (evento & EVENTO_100MS)
+            {
+                time(&now);
+                localtime_r(&now, &timeinfo);
+
+                if (timeinfo.tm_hour != timeinfo_prev.tm_hour)
+                {
+                    DibujarDigito(PanelHoras, 0, timeinfo.tm_hour / 10);
+                    DibujarDigito(PanelHoras, 1, timeinfo.tm_hour % 10);
+                }
+                if (timeinfo.tm_min != timeinfo_prev.tm_min)
+                {
+                    DibujarDigito(PanelMinutos, 0, timeinfo.tm_min / 10);
+                    DibujarDigito(PanelMinutos, 1, timeinfo.tm_min % 10);
+                }
+                if (timeinfo.tm_sec != timeinfo_prev.tm_sec)
+                {
+                    DibujarDigito(PanelSegundos, 0, timeinfo.tm_sec / 10);
+                    DibujarDigito(PanelSegundos, 1, timeinfo.tm_sec % 10);
+                }
+                if (timeinfo.tm_mday != timeinfo_prev.tm_mday)
+                {
+                    DibujarDigito(PanelDia, 0, timeinfo.tm_mday / 10);
+                    DibujarDigito(PanelDia, 1, timeinfo.tm_mday % 10);
+                }
+                if (timeinfo.tm_mon != timeinfo_prev.tm_mon)
+                {
+                    DibujarDigito(PanelMes, 0, (timeinfo.tm_mon + 1) / 10);
+                    DibujarDigito(PanelMes, 1, (timeinfo.tm_mon + 1) % 10);
+                }
+                year = timeinfo.tm_year + 1900;
+                if (year != year_prev)
+                {
+                    DibujarDigito(PanelAnio, 0, (year / 1000) % 10);
+                    DibujarDigito(PanelAnio, 1, (year / 100) % 10);
+                    DibujarDigito(PanelAnio, 2, (year / 10) % 10);
+                    DibujarDigito(PanelAnio, 3, year % 10);
+                    year_prev = year;
+                }
+                timeinfo_prev = timeinfo;
+            }
+        }
+    }
+}
+*/
