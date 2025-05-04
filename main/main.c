@@ -9,6 +9,7 @@
 #include "ili9341.h"
 #include "digitos.h"
 #include "teclasconfig.h"
+#include "leds.h"
 
 #define DIGITO_ANCHO 40
 #define DIGITO_ALTO 80
@@ -18,7 +19,7 @@
 #define DIGITO_FONDO ILI9341_BLACK
 
 bool modoAjusteReloj = false;
-
+bool alarmaActivada = false;
 static const char *TAG = "RTC";
 
 QueueHandle_t colaControlTiempo;
@@ -34,6 +35,7 @@ int modo = -1;
 
 void verificarAlarma(void *pvParameters)
 {
+
     while (true)
     {
         time_t now;
@@ -45,8 +47,8 @@ void verificarAlarma(void *pvParameters)
         if (timeinfo.tm_hour == alarm_hour && timeinfo.tm_min == alarm_min && timeinfo.tm_sec == 0)
         {
             ESP_LOGI("ALERTA", "🔥 ¡ALARMA ACTIVADA! Son las %02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-
-            // Aquí puedes agregar una acción, como activar un LED o un sonido de buzzer
+            alarmaActivada = true;
+            PrenderLedAzul(true);
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000)); // Esperar 1 segundo
@@ -61,7 +63,8 @@ void ajustarReloj(void *p)
         {TEC3_Dec, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY}};
 
     ConfigurarTeclas(configuraciones, sizeof(configuraciones) / sizeof(configuraciones[0]));
-
+    ConfigurarSalidasLed();
+    apagarLeds();
     struct tm timeinfo;
     time_t t;
     bool modoAjusteReloj = false;
@@ -89,6 +92,12 @@ void ajustarReloj(void *p)
         {
             if (tiempoInicioPresionado != 0)
             {
+                if (alarmaActivada)
+                {
+                    alarmaActivada = false;
+                    ESP_LOGI("Ajuste", "✅ Alarma desactivada");
+                    apagarLeds();
+                }
                 modo = (modo + 1) % 7;
                 modoAjusteReloj = (modo < 5);
                 modoAjusteAlarma = (modo >= 5);
@@ -247,9 +256,11 @@ void actualizarPantalla(void *p)
     panel_t PanelHoras = CrearPanel(9, 0, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
     panel_t PanelMinutos = CrearPanel(113, 0, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
     panel_t PanelSegundos = CrearPanel(223, 0, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
-    panel_t PanelDia = CrearPanel(40, 120, 2, DIGITO_ALTO - 40, DIGITO_ANCHO - 40, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
-    panel_t PanelMes = CrearPanel(110, 120, 2, DIGITO_ALTO - 40, DIGITO_ANCHO - 40, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
-    panel_t PanelAnio = CrearPanel(180, 120, 4, DIGITO_ALTO - 40, DIGITO_ANCHO - 40, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
+    panel_t PanelDia = CrearPanel(40, 100, 2, DIGITO_ALTO - 40, DIGITO_ANCHO - 40, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
+    panel_t PanelMes = CrearPanel(110, 100, 2, DIGITO_ALTO - 40, DIGITO_ANCHO - 40, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
+    panel_t PanelAnio = CrearPanel(180, 100, 4, DIGITO_ALTO - 40, DIGITO_ANCHO - 40, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
+    panel_t PanelHorasAlarma = CrearPanel(110, 165, 2, DIGITO_ALTO - 40, DIGITO_ANCHO - 40, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
+    panel_t PanelMinutosAlarma = CrearPanel(170, 165, 2, DIGITO_ALTO - 40, DIGITO_ANCHO - 40, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
 
     struct tm timeinfo;
     time_t now;
@@ -271,18 +282,29 @@ void actualizarPantalla(void *p)
     ILI9341DrawCircle(100, 55, 3, DIGITO_ENCENDIDO);
     ILI9341DrawCircle(210, 25, 3, DIGITO_ENCENDIDO);
     ILI9341DrawCircle(210, 55, 3, DIGITO_ENCENDIDO);
-    ILI9341DrawString(95, 130, "-", &font_11x18, DIGITO_ENCENDIDO, DIGITO_FONDO);
-    ILI9341DrawString(165, 130, "-", &font_11x18, DIGITO_ENCENDIDO, DIGITO_FONDO);
+    ILI9341DrawString(95, 110, "-", &font_11x18, DIGITO_ENCENDIDO, DIGITO_FONDO);
+    ILI9341DrawString(165, 110, "-", &font_11x18, DIGITO_ENCENDIDO, DIGITO_FONDO);
 
     int year = timeinfo.tm_year + 1900;
     DibujarDigito(PanelAnio, 0, (year / 1000) % 10);
     DibujarDigito(PanelAnio, 1, (year / 100) % 10);
     DibujarDigito(PanelAnio, 2, (year / 10) % 10);
     DibujarDigito(PanelAnio, 3, year % 10);
+    DibujarDigito(PanelHorasAlarma, 0, 0);
+    DibujarDigito(PanelHorasAlarma, 1, 0);
+
+    DibujarDigito(PanelHorasAlarma, 0, (alarm_hour / 10) % 10);
+    DibujarDigito(PanelHorasAlarma, 1, alarm_hour % 10);
+
+    DibujarDigito(PanelMinutosAlarma, 0, (alarm_min / 10) % 10);
+    DibujarDigito(PanelMinutosAlarma, 1, alarm_min % 10);
 
     struct tm timeinfo_prev = timeinfo;
     int year_prev = year;
     uint8_t evento;
+    int horasAlarmaAnterior = alarm_hour;
+    int minutosAlarmaAnterior = alarm_min;
+
     while (1)
     {
         if (xQueueReceive(colaControlTiempo, &evento, portMAX_DELAY))
@@ -292,6 +314,18 @@ void actualizarPantalla(void *p)
                 time(&now);
                 localtime_r(&now, &timeinfo);
 
+                if (alarm_hour != horasAlarmaAnterior)
+                {
+                    DibujarDigito(PanelHorasAlarma, 0, (alarm_hour / 10) % 10);
+                    DibujarDigito(PanelHorasAlarma, 1, alarm_hour % 10);
+                    horasAlarmaAnterior = alarm_hour;
+                }
+                if (alarm_min != minutosAlarmaAnterior)
+                {
+                    DibujarDigito(PanelMinutosAlarma, 0, (alarm_min / 10) % 10);
+                    DibujarDigito(PanelMinutosAlarma, 1, alarm_min % 10);
+                    minutosAlarmaAnterior = alarm_min;
+                }
                 if (timeinfo.tm_hour != timeinfo_prev.tm_hour)
                 {
                     DibujarDigito(PanelHoras, 0, timeinfo.tm_hour / 10);

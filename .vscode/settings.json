@@ -17,6 +17,7 @@
     "files.associations": {
         "teclasconfig.h": "c",
         "chrono": "c",
-        "rtc.h": "c"
+        "rtc.h": "c",
+        "ili9341.h": "c"
     }
 }
