@@ -26,6 +26,181 @@ QueueHandle_t colaControlTiempo;
 #define EVENTO_100MS (1 << 0)
 #define EVENTO_1S (1 << 1)
 
+// Variables globales para la alarma
+static int alarm_hour = 12;
+static int alarm_min = 1;
+bool modoAjusteAlarma = false;
+int modo = -1;
+
+void verificarAlarma(void *pvParameters)
+{
+    while (true)
+    {
+        time_t now;
+        struct tm timeinfo;
+        time(&now);
+        localtime_r(&now, &timeinfo);
+
+        // Comparar con los valores de la alarma
+        if (timeinfo.tm_hour == alarm_hour && timeinfo.tm_min == alarm_min && timeinfo.tm_sec == 0)
+        {
+            ESP_LOGI("ALERTA", "🔥 ¡ALARMA ACTIVADA! Son las %02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+
+            // Aquí puedes agregar una acción, como activar un LED o un sonido de buzzer
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1000)); // Esperar 1 segundo
+    }
+}
+
+void ajustarReloj(void *p)
+{
+    configuracion_pin_t configuraciones[] = {
+        {TEC1_Config, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY},
+        {TEC2_Inc, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY},
+        {TEC3_Dec, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY}};
+
+    ConfigurarTeclas(configuraciones, sizeof(configuraciones) / sizeof(configuraciones[0]));
+
+    struct tm timeinfo;
+    time_t t;
+    bool modoAjusteReloj = false;
+    TickType_t tiempoInicioPresionado = 0;
+
+    while (1)
+    {
+        // TEC1 para alternar entre los modos de ajuste
+        if (!gpio_get_level(TEC1_Config))
+        {
+            if (tiempoInicioPresionado == 0)
+            {
+                tiempoInicioPresionado = xTaskGetTickCount();
+            }
+            else if ((xTaskGetTickCount() - tiempoInicioPresionado) >= pdMS_TO_TICKS(2000))
+            {
+                modoAjusteReloj = false;
+                modoAjusteAlarma = false;
+                ESP_LOGI("Ajuste", "✅ Ajuste finalizado: Alarma configurada a %02d:%02d", alarm_hour, alarm_min);
+                tiempoInicioPresionado = 0;
+                vTaskDelay(pdMS_TO_TICKS(500));
+            }
+        }
+        else
+        {
+            if (tiempoInicioPresionado != 0)
+            {
+                modo = (modo + 1) % 7;
+                modoAjusteReloj = (modo < 5);
+                modoAjusteAlarma = (modo >= 5);
+
+                ESP_LOGI("Ajuste", "Modo ajuste ACTIVADO: %s",
+                         (modo == 0) ? "Minutos" : (modo == 1) ? "Horas"
+                                               : (modo == 2)   ? "Día"
+                                               : (modo == 3)   ? "Mes"
+                                               : (modo == 4)   ? "Año"
+                                               : (modo == 5)   ? "Minutos de la Alarma"
+                                                               : "Horas de la Alarma");
+
+                tiempoInicioPresionado = 0;
+                vTaskDelay(pdMS_TO_TICKS(300));
+            }
+        }
+
+        if (modoAjusteReloj || modoAjusteAlarma)
+        {
+            if (!gpio_get_level(TEC2_Inc))
+            {
+                time(&t);
+                localtime_r(&t, &timeinfo);
+
+                if (modoAjusteReloj)
+                {
+                    switch (modo)
+                    {
+                    case 0:
+                        timeinfo.tm_min = (timeinfo.tm_min + 1) % 60;
+                        break;
+                    case 1:
+                        timeinfo.tm_hour = (timeinfo.tm_hour + 1) % 24;
+                        break;
+                    case 2:
+                        timeinfo.tm_mday = (timeinfo.tm_mday % 31) + 1;
+                        break;
+                    case 3:
+                        timeinfo.tm_mon = (timeinfo.tm_mon + 1) % 12;
+                        break;
+                    case 4:
+                        timeinfo.tm_year = timeinfo.tm_year + 1;
+                        break;
+                    }
+                    t = mktime(&timeinfo);
+                    struct timeval now = {.tv_sec = t};
+                    settimeofday(&now, NULL);
+
+                    ESP_LOGI("Ajuste", "Nuevo valor: Hora %02d, Minuto %02d", timeinfo.tm_hour, timeinfo.tm_min);
+                }
+                else
+                {
+                    if (modo == 5)
+                        alarm_min = (alarm_min + 1) % 60;
+                    if (modo == 6)
+                        alarm_hour = (alarm_hour + 1) % 24;
+
+                    ESP_LOGI("Ajuste", "Nuevo valor alarma: Hora %02d, Minuto %02d", alarm_hour, alarm_min);
+                }
+
+                vTaskDelay(pdMS_TO_TICKS(300));
+            }
+
+            if (!gpio_get_level(TEC3_Dec))
+            {
+                time(&t);
+                localtime_r(&t, &timeinfo);
+
+                if (modoAjusteReloj)
+                {
+                    switch (modo)
+                    {
+                    case 0:
+                        timeinfo.tm_min = (timeinfo.tm_min == 0 ? 59 : timeinfo.tm_min - 1);
+                        break;
+                    case 1:
+                        timeinfo.tm_hour = (timeinfo.tm_hour == 0 ? 23 : timeinfo.tm_hour - 1);
+                        break;
+                    case 2:
+                        timeinfo.tm_mday = (timeinfo.tm_mday == 1 ? 31 : timeinfo.tm_mday - 1);
+                        break;
+                    case 3:
+                        timeinfo.tm_mon = (timeinfo.tm_mon == 0 ? 11 : timeinfo.tm_mon - 1);
+                        break;
+                    case 4:
+                        timeinfo.tm_year = timeinfo.tm_year - 1;
+                        break;
+                    }
+                    t = mktime(&timeinfo);
+                    struct timeval now = {.tv_sec = t};
+                    settimeofday(&now, NULL);
+
+                    ESP_LOGI("Ajuste", "Nuevo valor: Hora %02d, Minuto %02d", timeinfo.tm_hour, timeinfo.tm_min);
+                }
+                else
+                {
+                    if (modo == 5)
+                        alarm_min = (alarm_min == 0 ? 59 : alarm_min - 1);
+                    if (modo == 6)
+                        alarm_hour = (alarm_hour == 0 ? 23 : alarm_hour - 1);
+
+                    ESP_LOGI("Ajuste", "Nuevo valor alarma: Hora %02d, Minuto %02d", alarm_hour, alarm_min);
+                }
+
+                vTaskDelay(pdMS_TO_TICKS(300));
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
 void controlTiempo(void *p)
 {
     TickType_t xLastWakeTime = xTaskGetTickCount();
@@ -64,133 +239,6 @@ void obtenerFechaHora(void *p)
         }
     }
 }
-void ajustarFechaHora(void *p)
-{
-    configuracion_pin_t configuraciones[] = {
-        {TEC1_Config, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY},
-        {TEC2_Inc, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY},
-        {TEC3_Dec, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY}};
-
-    ConfigurarTeclas(configuraciones, sizeof(configuraciones) / sizeof(configuraciones[0]));
-
-    int modo = -1; // Inicialmente en -1 para que la primera vez ajuste minutos
-    struct tm timeinfo;
-    time_t t;
-
-    bool modoAjusteReloj = false; // Inicialmente apagado
-    TickType_t tiempoInicioPresionado = 0;
-
-    while (1)
-    {
-        // Verificar si se presiona TEC1_Config
-        if (!gpio_get_level(TEC1_Config))
-        {
-            if (tiempoInicioPresionado == 0)
-            {
-                tiempoInicioPresionado = xTaskGetTickCount();
-            }
-            else if ((xTaskGetTickCount() - tiempoInicioPresionado) >= pdMS_TO_TICKS(2000))
-            {
-                modoAjusteReloj = false; // Salir del modo ajuste si se mantiene presionado más de 2 segundos
-                ESP_LOGI("Ajuste", "modoAjusteReloj desactivado por presión prolongada");
-                tiempoInicioPresionado = 0;
-                vTaskDelay(pdMS_TO_TICKS(500)); // Evitar falsas activaciones
-            }
-        }
-        else
-        {
-            if (tiempoInicioPresionado != 0)
-            {
-                if ((xTaskGetTickCount() - tiempoInicioPresionado) < pdMS_TO_TICKS(2000))
-                {
-                    modoAjusteReloj = true; // Activar modo ajuste al presionar una vez
-                    modo = (modo + 1) % 5;  // Cambia entre opciones de configuración respetando el orden
-                    ESP_LOGI("Ajuste", "modoAjusteReloj ACTIVADO, ajustando: %s",
-                             (modo == 0) ? "Minutos" : (modo == 1) ? "Horas"
-                                                   : (modo == 2)   ? "Día"
-                                                   : (modo == 3)   ? "Mes"
-                                                                   : "Año");
-                }
-                tiempoInicioPresionado = 0;     // Restablecer tiempo de presión
-                vTaskDelay(pdMS_TO_TICKS(300)); // Anti rebote
-            }
-        }
-
-        // Solo modificar fecha y hora si el modo ajuste está activo
-        if (modoAjusteReloj)
-        {
-            if (!gpio_get_level(TEC2_Inc))
-            {
-                time(&t);
-                localtime_r(&t, &timeinfo);
-
-                switch (modo)
-                {
-                case 0:
-                    timeinfo.tm_min = (timeinfo.tm_min + 1) % 60;
-                    break;
-                case 1:
-                    timeinfo.tm_hour = (timeinfo.tm_hour + 1) % 24;
-                    break;
-                case 2:
-                    timeinfo.tm_mday = (timeinfo.tm_mday % 31) + 1;
-                    break;
-                case 3:
-                    timeinfo.tm_mon = (timeinfo.tm_mon + 1) % 12;
-                    break;
-                case 4:
-                    timeinfo.tm_year = timeinfo.tm_year + 1;
-                    break;
-                }
-                t = mktime(&timeinfo);
-                struct timeval now = {.tv_sec = t};
-                settimeofday(&now, NULL);
-                ESP_LOGI("Ajuste", "Incremento en: %s",
-                         (modo == 0) ? "Minutos" : (modo == 1) ? "Horas"
-                                               : (modo == 2)   ? "Día"
-                                               : (modo == 3)   ? "Mes"
-                                                               : "Año");
-                vTaskDelay(pdMS_TO_TICKS(300));
-            }
-
-            if (!gpio_get_level(TEC3_Dec))
-            {
-                time(&t);
-                localtime_r(&t, &timeinfo);
-
-                switch (modo)
-                {
-                case 0:
-                    timeinfo.tm_min = (timeinfo.tm_min == 0 ? 59 : timeinfo.tm_min - 1);
-                    break;
-                case 1:
-                    timeinfo.tm_hour = (timeinfo.tm_hour == 0 ? 23 : timeinfo.tm_hour - 1);
-                    break;
-                case 2:
-                    timeinfo.tm_mday = (timeinfo.tm_mday == 1 ? 31 : timeinfo.tm_mday - 1);
-                    break;
-                case 3:
-                    timeinfo.tm_mon = (timeinfo.tm_mon == 0 ? 11 : timeinfo.tm_mon - 1);
-                    break;
-                case 4:
-                    timeinfo.tm_year = timeinfo.tm_year - 1;
-                    break;
-                }
-                t = mktime(&timeinfo);
-                struct timeval now = {.tv_sec = t};
-                settimeofday(&now, NULL);
-                ESP_LOGI("Ajuste", "Decremento en: %s",
-                         (modo == 0) ? "Minutos" : (modo == 1) ? "Horas"
-                                               : (modo == 2)   ? "Día"
-                                               : (modo == 3)   ? "Mes"
-                                                               : "Año");
-                vTaskDelay(pdMS_TO_TICKS(300));
-            }
-        }
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
-}
-
 void actualizarPantalla(void *p)
 {
     ILI9341Init();
@@ -303,7 +351,8 @@ void app_main(void)
     xTaskCreate(obtenerFechaHora, "ObtieneFechaHora", 2048, NULL, 1, NULL);
     xTaskCreate(controlTiempo, "TiempoParaTareas", 2048, NULL, 2, NULL);
     xTaskCreate(actualizarPantalla, "ActualizarPantalla", 2048, NULL, 1, NULL);
-    xTaskCreate(ajustarFechaHora, "ConfigurarFechaHora", 2048, NULL, 1, NULL);
+    xTaskCreate(ajustarReloj, "ConfigurarFechaHora", 2048, NULL, 1, NULL);
+    xTaskCreate(verificarAlarma, "VerificarAlarma", 2048, NULL, 1, NULL);
 }
 /*void actualizarPantalla(void *p)
 {
