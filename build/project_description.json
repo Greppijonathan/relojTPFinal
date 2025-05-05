@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "cronometro1erEntrega",
-    "project_version":    "c328ab5-dirty",
+    "project_version":    "9ca4d17-dirty",
     "project_path":       "C:/Sistemas embebidos/Cursos/Sistemas operativos de tiempo real/RelojTPfinal",
     "idf_path":           "C:/Espressif/frameworks/esp-idf-v5.3.1",
     "build_dir":          "C:/Sistemas embebidos/Cursos/Sistemas operativos de tiempo real/RelojTPfinal/build",

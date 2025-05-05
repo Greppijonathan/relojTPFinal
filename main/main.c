@@ -28,30 +28,29 @@ QueueHandle_t colaControlTiempo;
 #define EVENTO_1S (1 << 1)
 
 // Variables globales para la alarma
-static int alarm_hour = 12;
-static int alarm_min = 1;
+static int alarmaHoras = 12;
+static int alarmaMinutos = 1;
 bool modoAjusteAlarma = false;
 int modo = -1;
 
-void verificarAlarma(void *pvParameters)
+void verificarAlarma(void *p)
 {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    time_t now;
+    struct tm timeinfo;
 
     while (true)
     {
-        time_t now;
-        struct tm timeinfo;
         time(&now);
         localtime_r(&now, &timeinfo);
 
-        // Comparar con los valores de la alarma
-        if (timeinfo.tm_hour == alarm_hour && timeinfo.tm_min == alarm_min && timeinfo.tm_sec == 0)
+        if (timeinfo.tm_hour == alarmaHoras && timeinfo.tm_min == alarmaMinutos && timeinfo.tm_sec == 0)
         {
-            ESP_LOGI("ALERTA", "🔥 ¡ALARMA ACTIVADA! Son las %02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+            ESP_LOGI("ALARMA", "❗ ALARMA ACTIVADA! Son las %02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
             alarmaActivada = true;
             PrenderLedAzul(true);
         }
-
-        vTaskDelay(pdMS_TO_TICKS(1000)); // Esperar 1 segundo
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1000));
     }
 }
 
@@ -72,7 +71,6 @@ void ajustarReloj(void *p)
 
     while (1)
     {
-        // TEC1 para alternar entre los modos de ajuste
         if (!gpio_get_level(TEC1_Config))
         {
             if (tiempoInicioPresionado == 0)
@@ -83,7 +81,7 @@ void ajustarReloj(void *p)
             {
                 modoAjusteReloj = false;
                 modoAjusteAlarma = false;
-                ESP_LOGI("Ajuste", "✅ Ajuste finalizado: Alarma configurada a %02d:%02d", alarm_hour, alarm_min);
+                ESP_LOGI("CONFIG", "✅ Alarma configurada! en %02d:%02d", alarmaHoras, alarmaMinutos);
                 tiempoInicioPresionado = 0;
                 vTaskDelay(pdMS_TO_TICKS(500));
             }
@@ -95,14 +93,14 @@ void ajustarReloj(void *p)
                 if (alarmaActivada)
                 {
                     alarmaActivada = false;
-                    ESP_LOGI("Ajuste", "✅ Alarma desactivada");
+                    ESP_LOGI("CONFIG", "❌ Alarma desactivada por teclado!");
                     apagarLeds();
                 }
                 modo = (modo + 1) % 7;
                 modoAjusteReloj = (modo < 5);
                 modoAjusteAlarma = (modo >= 5);
 
-                ESP_LOGI("Ajuste", "Modo ajuste ACTIVADO: %s",
+                ESP_LOGI("AJUSTE", "Se ajusta: %s",
                          (modo == 0) ? "Minutos" : (modo == 1) ? "Horas"
                                                : (modo == 2)   ? "Día"
                                                : (modo == 3)   ? "Mes"
@@ -146,16 +144,20 @@ void ajustarReloj(void *p)
                     struct timeval now = {.tv_sec = t};
                     settimeofday(&now, NULL);
 
-                    ESP_LOGI("Ajuste", "Nuevo valor: Hora %02d, Minuto %02d", timeinfo.tm_hour, timeinfo.tm_min);
+                    ESP_LOGI("CONFIG", "Hora %02d, Minuto %02d, fecha %02d/%02d/%04d, alarma %02d:%02d",
+                             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_mday, timeinfo.tm_mon + 1,
+                             timeinfo.tm_year + 1900, alarmaHoras, alarmaMinutos);
                 }
                 else
                 {
                     if (modo == 5)
-                        alarm_min = (alarm_min + 1) % 60;
+                        alarmaMinutos = (alarmaMinutos + 1) % 60;
                     if (modo == 6)
-                        alarm_hour = (alarm_hour + 1) % 24;
+                        alarmaHoras = (alarmaHoras + 1) % 24;
 
-                    ESP_LOGI("Ajuste", "Nuevo valor alarma: Hora %02d, Minuto %02d", alarm_hour, alarm_min);
+                    ESP_LOGI("CONFIG", "Hora %02d, Minuto %02d, fecha %02d/%02d/%04d, alarma %02d:%02d",
+                             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_mday, timeinfo.tm_mon + 1,
+                             timeinfo.tm_year + 1900, alarmaHoras, alarmaMinutos);
                 }
 
                 vTaskDelay(pdMS_TO_TICKS(300));
@@ -190,16 +192,20 @@ void ajustarReloj(void *p)
                     struct timeval now = {.tv_sec = t};
                     settimeofday(&now, NULL);
 
-                    ESP_LOGI("Ajuste", "Nuevo valor: Hora %02d, Minuto %02d", timeinfo.tm_hour, timeinfo.tm_min);
+                    ESP_LOGI("CONFIG", "Hora %02d, Minuto %02d, fecha %02d/%02d/%04d, alarma %02d:%02d",
+                             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_mday, timeinfo.tm_mon + 1,
+                             timeinfo.tm_year + 1900, alarmaHoras, alarmaMinutos);
                 }
                 else
                 {
                     if (modo == 5)
-                        alarm_min = (alarm_min == 0 ? 59 : alarm_min - 1);
+                        alarmaMinutos = (alarmaMinutos == 0 ? 59 : alarmaMinutos - 1);
                     if (modo == 6)
-                        alarm_hour = (alarm_hour == 0 ? 23 : alarm_hour - 1);
+                        alarmaHoras = (alarmaHoras == 0 ? 23 : alarmaHoras - 1);
 
-                    ESP_LOGI("Ajuste", "Nuevo valor alarma: Hora %02d, Minuto %02d", alarm_hour, alarm_min);
+                    ESP_LOGI("CONFIG", "Hora %02d, Minuto %02d, fecha %02d/%02d/%04d, alarma %02d:%02d",
+                             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_mday, timeinfo.tm_mon + 1,
+                             timeinfo.tm_year + 1900, alarmaHoras, alarmaMinutos);
                 }
 
                 vTaskDelay(pdMS_TO_TICKS(300));
@@ -293,17 +299,17 @@ void actualizarPantalla(void *p)
     DibujarDigito(PanelHorasAlarma, 0, 0);
     DibujarDigito(PanelHorasAlarma, 1, 0);
 
-    DibujarDigito(PanelHorasAlarma, 0, (alarm_hour / 10) % 10);
-    DibujarDigito(PanelHorasAlarma, 1, alarm_hour % 10);
+    DibujarDigito(PanelHorasAlarma, 0, (alarmaHoras / 10) % 10);
+    DibujarDigito(PanelHorasAlarma, 1, alarmaHoras % 10);
 
-    DibujarDigito(PanelMinutosAlarma, 0, (alarm_min / 10) % 10);
-    DibujarDigito(PanelMinutosAlarma, 1, alarm_min % 10);
+    DibujarDigito(PanelMinutosAlarma, 0, (alarmaMinutos / 10) % 10);
+    DibujarDigito(PanelMinutosAlarma, 1, alarmaMinutos % 10);
 
     struct tm timeinfo_prev = timeinfo;
     int year_prev = year;
     uint8_t evento;
-    int horasAlarmaAnterior = alarm_hour;
-    int minutosAlarmaAnterior = alarm_min;
+    int horasAlarmaAnterior = alarmaHoras;
+    int minutosAlarmaAnterior = alarmaMinutos;
 
     while (1)
     {
@@ -314,17 +320,17 @@ void actualizarPantalla(void *p)
                 time(&now);
                 localtime_r(&now, &timeinfo);
 
-                if (alarm_hour != horasAlarmaAnterior)
+                if (alarmaHoras != horasAlarmaAnterior)
                 {
-                    DibujarDigito(PanelHorasAlarma, 0, (alarm_hour / 10) % 10);
-                    DibujarDigito(PanelHorasAlarma, 1, alarm_hour % 10);
-                    horasAlarmaAnterior = alarm_hour;
+                    DibujarDigito(PanelHorasAlarma, 0, (alarmaHoras / 10) % 10);
+                    DibujarDigito(PanelHorasAlarma, 1, alarmaHoras % 10);
+                    horasAlarmaAnterior = alarmaHoras;
                 }
-                if (alarm_min != minutosAlarmaAnterior)
+                if (alarmaMinutos != minutosAlarmaAnterior)
                 {
-                    DibujarDigito(PanelMinutosAlarma, 0, (alarm_min / 10) % 10);
-                    DibujarDigito(PanelMinutosAlarma, 1, alarm_min % 10);
-                    minutosAlarmaAnterior = alarm_min;
+                    DibujarDigito(PanelMinutosAlarma, 0, (alarmaMinutos / 10) % 10);
+                    DibujarDigito(PanelMinutosAlarma, 1, alarmaMinutos % 10);
+                    minutosAlarmaAnterior = alarmaMinutos;
                 }
                 if (timeinfo.tm_hour != timeinfo_prev.tm_hour)
                 {
@@ -388,96 +394,3 @@ void app_main(void)
     xTaskCreate(ajustarReloj, "ConfigurarFechaHora", 2048, NULL, 1, NULL);
     xTaskCreate(verificarAlarma, "VerificarAlarma", 2048, NULL, 1, NULL);
 }
-/*void actualizarPantalla(void *p)
-{
-    ILI9341Init();
-    ILI9341Rotate(ILI9341_Landscape_1);
-
-    panel_t PanelHoras = CrearPanel(9, 0, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
-    panel_t PanelMinutos = CrearPanel(113, 0, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
-    panel_t PanelSegundos = CrearPanel(223, 0, 2, DIGITO_ALTO, DIGITO_ANCHO, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
-    panel_t PanelDia = CrearPanel(40, 120, 2, DIGITO_ALTO - 40, DIGITO_ANCHO - 40, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
-    panel_t PanelMes = CrearPanel(110, 120, 2, DIGITO_ALTO - 40, DIGITO_ANCHO - 40, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
-    panel_t PanelAnio = CrearPanel(180, 120, 4, DIGITO_ALTO - 40, DIGITO_ANCHO - 40, DIGITO_ENCENDIDO, DIGITO_APAGADO, DIGITO_FONDO);
-
-    struct tm timeinfo;
-    time_t now;
-    time(&now);
-    localtime_r(&now, &timeinfo);
-
-    DibujarDigito(PanelHoras, 0, timeinfo.tm_hour / 10);
-    DibujarDigito(PanelHoras, 1, timeinfo.tm_hour % 10);
-    DibujarDigito(PanelMinutos, 0, timeinfo.tm_min / 10);
-    DibujarDigito(PanelMinutos, 1, timeinfo.tm_min % 10);
-    DibujarDigito(PanelSegundos, 0, timeinfo.tm_sec / 10);
-    DibujarDigito(PanelSegundos, 1, timeinfo.tm_sec % 10);
-    DibujarDigito(PanelDia, 0, timeinfo.tm_mday / 10);
-    DibujarDigito(PanelDia, 1, timeinfo.tm_mday % 10);
-    DibujarDigito(PanelMes, 0, (timeinfo.tm_mon + 1) / 10);
-    DibujarDigito(PanelMes, 1, (timeinfo.tm_mon + 1) % 10);
-
-    ILI9341DrawCircle(100, 25, 3, DIGITO_ENCENDIDO);
-    ILI9341DrawCircle(100, 55, 3, DIGITO_ENCENDIDO);
-    ILI9341DrawCircle(210, 25, 3, DIGITO_ENCENDIDO);
-    ILI9341DrawCircle(210, 55, 3, DIGITO_ENCENDIDO);
-    ILI9341DrawString(95, 130, "-", &font_11x18, DIGITO_ENCENDIDO, DIGITO_FONDO);
-    ILI9341DrawString(165, 130, "-", &font_11x18, DIGITO_ENCENDIDO, DIGITO_FONDO);
-
-    int year = timeinfo.tm_year + 1900;
-    DibujarDigito(PanelAnio, 0, (year / 1000) % 10);
-    DibujarDigito(PanelAnio, 1, (year / 100) % 10);
-    DibujarDigito(PanelAnio, 2, (year / 10) % 10);
-    DibujarDigito(PanelAnio, 3, year % 10);
-
-    struct tm timeinfo_prev = timeinfo;
-    int year_prev = year;
-    uint8_t evento;
-    while (1)
-    {
-        if (xQueueReceive(colaControlTiempo, &evento, portMAX_DELAY))
-        {
-            if (evento & EVENTO_100MS)
-            {
-                time(&now);
-                localtime_r(&now, &timeinfo);
-
-                if (timeinfo.tm_hour != timeinfo_prev.tm_hour)
-                {
-                    DibujarDigito(PanelHoras, 0, timeinfo.tm_hour / 10);
-                    DibujarDigito(PanelHoras, 1, timeinfo.tm_hour % 10);
-                }
-                if (timeinfo.tm_min != timeinfo_prev.tm_min)
-                {
-                    DibujarDigito(PanelMinutos, 0, timeinfo.tm_min / 10);
-                    DibujarDigito(PanelMinutos, 1, timeinfo.tm_min % 10);
-                }
-                if (timeinfo.tm_sec != timeinfo_prev.tm_sec)
-                {
-                    DibujarDigito(PanelSegundos, 0, timeinfo.tm_sec / 10);
-                    DibujarDigito(PanelSegundos, 1, timeinfo.tm_sec % 10);
-                }
-                if (timeinfo.tm_mday != timeinfo_prev.tm_mday)
-                {
-                    DibujarDigito(PanelDia, 0, timeinfo.tm_mday / 10);
-                    DibujarDigito(PanelDia, 1, timeinfo.tm_mday % 10);
-                }
-                if (timeinfo.tm_mon != timeinfo_prev.tm_mon)
-                {
-                    DibujarDigito(PanelMes, 0, (timeinfo.tm_mon + 1) / 10);
-                    DibujarDigito(PanelMes, 1, (timeinfo.tm_mon + 1) % 10);
-                }
-                year = timeinfo.tm_year + 1900;
-                if (year != year_prev)
-                {
-                    DibujarDigito(PanelAnio, 0, (year / 1000) % 10);
-                    DibujarDigito(PanelAnio, 1, (year / 100) % 10);
-                    DibujarDigito(PanelAnio, 2, (year / 10) % 10);
-                    DibujarDigito(PanelAnio, 3, year % 10);
-                    year_prev = year;
-                }
-                timeinfo_prev = timeinfo;
-            }
-        }
-    }
-}
-*/
