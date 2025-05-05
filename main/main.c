@@ -31,7 +31,7 @@ QueueHandle_t colaControlTiempo;
 static int alarmaHoras = 12;
 static int alarmaMinutos = 1;
 bool modoAjusteAlarma = false;
-int modo = -1;
+int modoConfig = -1;
 
 void verificarAlarma(void *p)
 {
@@ -54,16 +54,9 @@ void verificarAlarma(void *p)
     }
 }
 
-void ajustarReloj(void *p)
+void ajustarRelojTeclado(void *p)
 {
-    configuracion_pin_t configuraciones[] = {
-        {TEC1_Config, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY},
-        {TEC2_Inc, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY},
-        {TEC3_Dec, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY}};
 
-    ConfigurarTeclas(configuraciones, sizeof(configuraciones) / sizeof(configuraciones[0]));
-    ConfigurarSalidasLed();
-    apagarLeds();
     struct tm timeinfo;
     time_t t;
     bool modoAjusteReloj = false;
@@ -96,17 +89,17 @@ void ajustarReloj(void *p)
                     ESP_LOGI("CONFIG", "❌ Alarma desactivada por teclado!");
                     apagarLeds();
                 }
-                modo = (modo + 1) % 7;
-                modoAjusteReloj = (modo < 5);
-                modoAjusteAlarma = (modo >= 5);
+                modoConfig = (modoConfig + 1) % 7;
+                modoAjusteReloj = (modoConfig < 5);
+                modoAjusteAlarma = (modoConfig >= 5);
 
                 ESP_LOGI("AJUSTE", "Se ajusta: %s",
-                         (modo == 0) ? "Minutos" : (modo == 1) ? "Horas"
-                                               : (modo == 2)   ? "Día"
-                                               : (modo == 3)   ? "Mes"
-                                               : (modo == 4)   ? "Año"
-                                               : (modo == 5)   ? "Minutos de la Alarma"
-                                                               : "Horas de la Alarma");
+                         (modoConfig == 0) ? "Minutos" : (modoConfig == 1) ? "Horas"
+                                                     : (modoConfig == 2)   ? "Día"
+                                                     : (modoConfig == 3)   ? "Mes"
+                                                     : (modoConfig == 4)   ? "Año"
+                                                     : (modoConfig == 5)   ? "Minutos de la Alarma"
+                                                                           : "Horas de la Alarma");
 
                 tiempoInicioPresionado = 0;
                 vTaskDelay(pdMS_TO_TICKS(300));
@@ -122,7 +115,7 @@ void ajustarReloj(void *p)
 
                 if (modoAjusteReloj)
                 {
-                    switch (modo)
+                    switch (modoConfig)
                     {
                     case 0:
                         timeinfo.tm_min = (timeinfo.tm_min + 1) % 60;
@@ -150,9 +143,9 @@ void ajustarReloj(void *p)
                 }
                 else
                 {
-                    if (modo == 5)
+                    if (modoConfig == 5)
                         alarmaMinutos = (alarmaMinutos + 1) % 60;
-                    if (modo == 6)
+                    if (modoConfig == 6)
                         alarmaHoras = (alarmaHoras + 1) % 24;
 
                     ESP_LOGI("CONFIG", "Hora %02d, Minuto %02d, fecha %02d/%02d/%04d, alarma %02d:%02d",
@@ -170,7 +163,7 @@ void ajustarReloj(void *p)
 
                 if (modoAjusteReloj)
                 {
-                    switch (modo)
+                    switch (modoConfig)
                     {
                     case 0:
                         timeinfo.tm_min = (timeinfo.tm_min == 0 ? 59 : timeinfo.tm_min - 1);
@@ -198,9 +191,9 @@ void ajustarReloj(void *p)
                 }
                 else
                 {
-                    if (modo == 5)
+                    if (modoConfig == 5)
                         alarmaMinutos = (alarmaMinutos == 0 ? 59 : alarmaMinutos - 1);
-                    if (modo == 6)
+                    if (modoConfig == 6)
                         alarmaHoras = (alarmaHoras == 0 ? 23 : alarmaHoras - 1);
 
                     ESP_LOGI("CONFIG", "Hora %02d, Minuto %02d, fecha %02d/%02d/%04d, alarma %02d:%02d",
@@ -374,6 +367,16 @@ void actualizarPantalla(void *p)
 
 void app_main(void)
 {
+    configuracion_pin_t configuraciones[] = {
+        {TEC1_Config, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY},
+        {TEC2_Inc, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY},
+        {TEC3_Dec, GPIO_MODE_INPUT, GPIO_PULLUP_ONLY}};
+
+    ConfigurarTeclas(configuraciones, sizeof(configuraciones) / sizeof(configuraciones[0]));
+
+    ConfigurarSalidasLed();
+    apagarLeds();
+
     struct tm timeinfo = {
         .tm_year = 2025 - 1900,
         .tm_mon = 0,
@@ -388,9 +391,9 @@ void app_main(void)
 
     colaControlTiempo = xQueueCreate(10, sizeof(uint8_t));
 
-    xTaskCreate(obtenerFechaHora, "ObtieneFechaHora", 2048, NULL, 1, NULL);
-    xTaskCreate(controlTiempo, "TiempoParaTareas", 2048, NULL, 2, NULL);
-    xTaskCreate(actualizarPantalla, "ActualizarPantalla", 2048, NULL, 1, NULL);
-    xTaskCreate(ajustarReloj, "ConfigurarFechaHora", 2048, NULL, 1, NULL);
-    xTaskCreate(verificarAlarma, "VerificarAlarma", 2048, NULL, 1, NULL);
+    xTaskCreate(obtenerFechaHora, "Obtiene Fecha Hora anio", 2048, NULL, 1, NULL);
+    xTaskCreate(controlTiempo, "Carga eventos temporales en una cola", 2048, NULL, 2, NULL);
+    xTaskCreate(actualizarPantalla, "Actualizar Pantalla tft", 2048, NULL, 1, NULL);
+    xTaskCreate(ajustarRelojTeclado, "Configurar Fecha Hora año y alarmas desde teclado", 2048, NULL, 1, NULL);
+    xTaskCreate(verificarAlarma, "Verificar si se debe disparar Alarma", 2048, NULL, 1, NULL);
 }
